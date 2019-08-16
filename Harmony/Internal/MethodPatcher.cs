@@ -55,14 +55,14 @@ namespace HarmonyLib
 
 				prefixes.Union(postfixes).Union(finalizers).ToList().ForEach(fix =>
 				{
-					if (fix.DeclaringType != null && privateVars.ContainsKey(fix.DeclaringType.FullName) == false)
+					if (privateVars.ContainsKey(fix.DeclaringType?.FullName ?? "") == false)
 					{
 						fix.GetParameters()
 						.Where(patchParam => patchParam.Name == STATE_VAR)
 						.Do(patchParam =>
 						{
 							var privateStateVariable = DynamicTools.DeclareLocalVariable(il, patchParam.ParameterType);
-							privateVars[fix.DeclaringType.FullName] = privateStateVariable;
+							privateVars[fix.DeclaringType?.FullName ?? ""] = privateStateVariable;
 						});
 					}
 				});

@@ -27,6 +27,7 @@ namespace WebAPI.Controllers
         [Uow]
         public string Get(string s)
         {
+            Console.WriteLine("DDD");
             return "1";
         }
     }
@@ -46,11 +47,22 @@ namespace WebAPI.Controllers
 
             public bool BeforeProcess(InterceptorContext ctx)
             {
-                return false;
+                Console.WriteLine(ctx.Target);
+                ctx.ReturnValue.SetValue("000");
+                ctx.Context["a"] = 1;
+                return true;
             }
 
             public bool AfterProcess(InterceptorContext ctx)
             {
+                Console.WriteLine(ctx.Target);
+                foreach (var o in ctx.Parameters.Select(e=>e.GetValue()))
+                {
+                    Console.WriteLine(o);
+                }
+                Console.WriteLine(ctx.ReturnValue.GetValue());
+                Console.WriteLine(ctx.Context["a"]);
+                ctx.ReturnValue.SetValue("AAAA");
                 return false;
             }
         }
