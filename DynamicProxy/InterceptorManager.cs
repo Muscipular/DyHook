@@ -1,26 +1,22 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Linq;
-using System.Linq.Expressions;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
 using System.Threading;
-using FastExpressionCompiler;
 using HarmonyLib;
-using Sigil;
 
 namespace DynamicProxy
 {
     public class InterceptorManager
     {
-        protected static Harmony _harmony;
+        protected internal static Harmony _harmony;
 
-        protected static AssemblyBuilder _assemblyBuilder;
+        protected internal static AssemblyBuilder _assemblyBuilder;
 
-        protected static ModuleBuilder _dynamicModule;
+        protected internal static ModuleBuilder _dynamicModule;
 
         static InterceptorManager()
         {
@@ -28,10 +24,44 @@ namespace DynamicProxy
             _dynamicModule = _assemblyBuilder.DefineDynamicModule("m");
             _harmony = new Harmony(typeof(InterceptorManager).FullName);
         }
+        
+        
+        protected internal static Type CreateDelegateType(string key, Type[] parameterTypes, Type returnType)
+        {
+            var typeBuilder = _dynamicModule.DefineType(key, TypeAttributes.Public | TypeAttributes.AutoLayout | TypeAttributes.AnsiClass | TypeAttributes.Sealed, typeof(MulticastDelegate));
+            typeBuilder.DefineConstructor(
+                MethodAttributes.Public | MethodAttributes.HideBySig | MethodAttributes.SpecialName | MethodAttributes.RTSpecialName,
+                CallingConventions.Standard, new[] { typeof(object), typeof(IntPtr) }
+            ).SetImplementationFlags(MethodImplAttributes.Runtime);
+            var methodBuilder = typeBuilder.DefineMethod("Invoke",
+                MethodAttributes.Public | MethodAttributes.HideBySig | MethodAttributes.NewSlot | MethodAttributes.Virtual,
+                CallingConventions.Standard, returnType, parameterTypes);
+            methodBuilder.SetImplementationFlags(MethodImplAttributes.Runtime);
+
+            var delegateType = typeBuilder.CreateType();
+            return delegateType;
+        }
     }
 
-    public class InterceptorManager<T> : InterceptorManager
+    public sealed class InterceptorManager<T> : InterceptorManager
     {
+        static class Generator
+        {
+            [MethodImpl(MethodImplOptions.NoInlining)]
+            static DynamicMethod Prefix(MethodBase method)
+            {
+                var s = $"{method.Name}_{method.MetadataToken}";
+                return Dictionary2[s].Item1;
+            }
+
+            [MethodImpl(MethodImplOptions.NoInlining)]
+            static DynamicMethod Postfix(MethodBase method)
+            {
+                var s = $"{method.Name}_{method.MetadataToken}";
+                return Dictionary2[s].Item2;
+            }
+        }
+
         public static ConcurrentDictionary<string, IInterceptor[]> Dictionary { get; } = new ConcurrentDictionary<string, IInterceptor[]>();
 
         public static ConcurrentDictionary<string, (DynamicMethod, DynamicMethod)> Dictionary2 { get; } = new ConcurrentDictionary<string, (DynamicMethod, DynamicMethod)>();
@@ -84,23 +114,6 @@ namespace DynamicProxy
             }
 
             return true;
-        }
-
-        static class Generator
-        {
-            [MethodImpl(MethodImplOptions.NoInlining)]
-            static DynamicMethod Prefix(MethodBase method)
-            {
-                var s = $"{method.Name}_{method.MetadataToken}";
-                return Dictionary2[s].Item1;
-            }
-
-            [MethodImpl(MethodImplOptions.NoInlining)]
-            static DynamicMethod Postfix(MethodBase method)
-            {
-                var s = $"{method.Name}_{method.MetadataToken}";
-                return Dictionary2[s].Item2;
-            }
         }
 
 
@@ -184,8 +197,13 @@ namespace DynamicProxy
             dynamicMethod.LoadLocal("ix");
             dynamicMethod.LoadElement<IInterceptor>();
             dynamicMethod.LoadLocal("ctx");
+            dynamicMethod.DeclareLocal(typeof(InterceptControl), "ret");
             dynamicMethod.CallVirtual(AccessTools.Method(typeof(IInterceptor), nameof(IInterceptor.AfterProcess)));
-            dynamicMethod.BranchIfTrue("break1");
+            dynamicMethod.StoreLocal("ret");
+            dynamicMethod.LoadLocal("ret");
+            dynamicMethod.LoadConstant(0);
+            dynamicMethod.CompareEqual();
+            dynamicMethod.BranchIfFalse("break1");
 
             dynamicMethod.LoadConstant(1);
             dynamicMethod.LoadLocal("ix");
@@ -266,21 +284,6 @@ namespace DynamicProxy
             return dm;
         }
 
-        private static Type CreateDelegateType(string key, Type[] parameterTypes, Type returnType)
-        {
-            var typeBuilder = _dynamicModule.DefineType(key, TypeAttributes.Public | TypeAttributes.AutoLayout | TypeAttributes.AnsiClass | TypeAttributes.Sealed, typeof(MulticastDelegate));
-            typeBuilder.DefineConstructor(
-                MethodAttributes.Public | MethodAttributes.HideBySig | MethodAttributes.SpecialName | MethodAttributes.RTSpecialName,
-                CallingConventions.Standard, new[] { typeof(object), typeof(IntPtr) }
-            ).SetImplementationFlags(MethodImplAttributes.Runtime);
-            var methodBuilder = typeBuilder.DefineMethod("Invoke",
-                MethodAttributes.Public | MethodAttributes.HideBySig | MethodAttributes.NewSlot | MethodAttributes.Virtual,
-                CallingConventions.Standard, returnType, parameterTypes);
-            methodBuilder.SetImplementationFlags(MethodImplAttributes.Runtime);
-
-            var delegateType = typeBuilder.CreateType();
-            return delegateType;
-        }
 
         private static DynamicMethod Prefix(List<(Type type, string name, bool isRef, bool isPara)> list, string key, int startIndex, MethodInfo methodInfo)
         {
@@ -366,9 +369,14 @@ namespace DynamicProxy
             dynamicMethod.LoadLocal("ix");
             dynamicMethod.LoadElement<IInterceptor>();
             dynamicMethod.LoadLocal("ctx");
+            dynamicMethod.DeclareLocal<InterceptControl>("ctrl");
             dynamicMethod.CallVirtual(AccessTools.Method(typeof(IInterceptor), nameof(IInterceptor.BeforeProcess)));
-            dynamicMethod.Duplicate().StoreLocal("ret");
-            dynamicMethod.BranchIfTrue("break1");
+            dynamicMethod.StoreLocal("ctrl");
+            dynamicMethod.LoadLocal("ctrl").LoadConstant((int)InterceptControl.SkipOriginalMethod).CompareEqual();
+            dynamicMethod.LoadLocal("ctrl").LoadConstant((int)InterceptControl.All).CompareEqual();
+            dynamicMethod.Or().LoadLocal("ret").Or().StoreLocal("ret");
+            dynamicMethod.LoadLocal("ctrl").LoadConstant(0).CompareEqual();
+            dynamicMethod.BranchIfFalse("break1");
 
             dynamicMethod.LoadConstant(1);
             dynamicMethod.LoadLocal("ix");
@@ -438,7 +446,7 @@ namespace DynamicProxy
             dynamicMethod.LoadLocal("opt");
             // dynamicMethod.WriteLine("{0}", dynamicMethod.Locals["opt"]);
             dynamicMethod.StoreIndirect(typeof(Dictionary<object, object>));
-            dynamicMethod.LoadLocal("ret").LoadConstant(true).Xor();
+            dynamicMethod.LoadLocal("ret").LoadConstant(false).CompareEqual();
             dynamicMethod.Return();
 
             var delegateType = CreateDelegateType(key + "_prefix", parameterTypes, typeof(bool));
@@ -452,189 +460,6 @@ namespace DynamicProxy
                 AccessTools.Field(parameterInfo.GetType(), "NameImpl").SetValue(parameterInfo, list[i].name);
             }
             return dm;
-        }
-    }
-
-    public interface IInterceptor
-    {
-        bool BeforeProcess(InterceptorContext ctx);
-
-        bool AfterProcess(InterceptorContext ctx);
-    }
-
-    public interface IInterceptorContext
-    {
-        MethodInfo Method { get; }
-
-        object Target { get; }
-
-        IReadOnlyList<IDynamicAccessor> Parameters { get; }
-
-        IDynamicAccessor ReturnValue { get; }
-
-        IDictionary<object, object> Context { get; set; }
-    }
-
-    public class InterceptorContext : IInterceptorContext
-    {
-        public InterceptorContext(MethodInfo method, object target, IReadOnlyList<IDynamicAccessor> parameters, IDynamicAccessor returnValue, IDictionary<object, object> context)
-        {
-            Method = method;
-            Target = target;
-            Parameters = parameters;
-            ReturnValue = returnValue;
-            Context = context;
-        }
-
-        public MethodInfo Method { get; set; }
-
-        public object Target { get; set; }
-
-        public IReadOnlyList<IDynamicAccessor> Parameters { get; set; }
-
-        public IDynamicAccessor ReturnValue { get; set; }
-
-        public IDictionary<object, object> Context { get; set; }
-    }
-
-    public interface IDynamicAccessor
-    {
-        object GetValue();
-
-        bool CanGet { get; }
-
-        bool CanSet { get; }
-
-        void SetValue(object v);
-    }
-
-    public class RefDynamicAccessor : IDynamicAccessor
-    {
-        public object Value { get; set; }
-
-        public RefDynamicAccessor(object f)
-        {
-            this.Value = f;
-        }
-
-        public object GetValue()
-        {
-            return Value;
-        }
-
-        public bool CanGet => true;
-
-        public bool CanSet => true;
-
-        public void SetValue(object v)
-        {
-            Value = v;
-        }
-    }
-
-    [AttributeUsage(AttributeTargets.Method)]
-    public class InterceptorAttribute : Attribute
-    {
-        public InterceptorAttribute(Type interceptorType)
-        {
-            InterceptorType = interceptorType;
-        }
-
-        public Type InterceptorType { get; }
-
-        public object[] InterceptorArguments { get; set; } = Array.Empty<object>();
-    }
-
-    public class PropDynamicAccessor : IDynamicAccessor
-    {
-        private PropertyInfo _fieldInfo;
-
-        private Func<object> Getter;
-
-        private Action<object> Setter;
-
-        public PropDynamicAccessor(object instance, PropertyInfo fieldInfo)
-        {
-            _fieldInfo = fieldInfo;
-            var constant = Expression.Constant(instance, fieldInfo.DeclaringType);
-            if (!fieldInfo.CanRead)
-            {
-                Getter = Expression.Lambda<Func<object>>(Expression.Convert(Expression.Property(constant, _fieldInfo), typeof(object))).CompileFast();
-            }
-            if (fieldInfo.CanWrite)
-            {
-                var varExp = Expression.Variable(fieldInfo.DeclaringType);
-                Setter = Expression.Lambda<Action<object>>(Expression.Assign(Expression.Property(constant, fieldInfo), Expression.Convert(varExp, fieldInfo.PropertyType)), varExp).CompileFast();
-            }
-        }
-
-        public object GetValue()
-        {
-            if (!CanGet)
-            {
-                throw new AccessorException($"{_fieldInfo.DeclaringType.FullName}.{_fieldInfo.Name} is writeonly.");
-            }
-            return Getter();
-        }
-
-        public bool CanGet => Getter != null;
-
-        public bool CanSet => Setter != null;
-
-        public void SetValue(object v)
-        {
-            if (!CanSet)
-            {
-                throw new AccessorException($"{_fieldInfo.DeclaringType.FullName}.{_fieldInfo.Name} is readonly.");
-            }
-            Setter(v);
-        }
-    }
-
-    public class DynamicAccessor : IDynamicAccessor
-    {
-        private FieldInfo _fieldInfo;
-
-        private Func<object> Getter;
-
-        private Action<object> Setter;
-
-        public DynamicAccessor(object instance, FieldInfo fieldInfo)
-        {
-            _fieldInfo = fieldInfo;
-            var constant = Expression.Constant(instance, fieldInfo.DeclaringType);
-            Getter = Expression.Lambda<Func<object>>(Expression.Convert(Expression.Field(constant, _fieldInfo), typeof(object))).CompileFast();
-            if (!fieldInfo.IsInitOnly)
-            {
-                var varExp = Expression.Variable(fieldInfo.DeclaringType);
-                Setter = Expression.Lambda<Action<object>>(Expression.Assign(Expression.Field(constant, fieldInfo), Expression.Convert(varExp, fieldInfo.FieldType)), varExp).CompileFast();
-            }
-        }
-
-        public object GetValue() => Getter();
-
-        public bool CanGet => Getter != null;
-
-        public bool CanSet => Setter != null;
-
-        public void SetValue(object v)
-        {
-            if (Setter == null)
-            {
-                throw new AccessorException($"{_fieldInfo.DeclaringType.FullName}.{_fieldInfo.Name} is readonly.");
-            }
-            Setter(v);
-        }
-    }
-
-    public class AccessorException : Exception
-    {
-        public AccessorException()
-        {
-        }
-
-        public AccessorException(string message) : base(message)
-        {
         }
     }
 }

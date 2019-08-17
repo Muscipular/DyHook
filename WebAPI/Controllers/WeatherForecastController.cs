@@ -45,15 +45,15 @@ namespace WebAPI.Controllers
             {
             }
 
-            public bool BeforeProcess(InterceptorContext ctx)
+            public InterceptControl BeforeProcess(InterceptorContext ctx)
             {
                 Console.WriteLine(ctx.Target);
                 ctx.ReturnValue.SetValue("000");
                 ctx.Context["a"] = 1;
-                return true;
+                return InterceptControl.SkipOriginalMethod;
             }
 
-            public bool AfterProcess(InterceptorContext ctx)
+            public InterceptControl AfterProcess(InterceptorContext ctx)
             {
                 Console.WriteLine(ctx.Target);
                 foreach (var o in ctx.Parameters.Select(e=>e.GetValue()))
@@ -63,7 +63,7 @@ namespace WebAPI.Controllers
                 Console.WriteLine(ctx.ReturnValue.GetValue());
                 Console.WriteLine(ctx.Context["a"]);
                 ctx.ReturnValue.SetValue("AAAA");
-                return false;
+                return InterceptControl.None;
             }
         }
     }

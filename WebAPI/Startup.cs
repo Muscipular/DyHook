@@ -20,17 +20,6 @@ namespace WebAPI
     {
         public Startup(IConfiguration configuration)
         {
-            var method = new DynamicMethod("aa", null, new[] { typeof(int).MakeByRefType() });
-            var ilGenerator = method.GetILGenerator();
-            ilGenerator.Emit(OpCodes.Ldarg_0);
-            ilGenerator.Emit(OpCodes.Ldc_I4_1);
-            ilGenerator.Emit(OpCodes.Stind_I4);
-            ilGenerator.Emit(OpCodes.Ret);
-            var @delegate = method.CreateDelegate(typeof(AAA));
-            AAA a = (AAA)@delegate;
-            int x = 0;
-            a(ref x);
-            Console.WriteLine(x);
             InterceptorManager<WeatherForecastController>.Intercept();
             Configuration = configuration;
         }
