@@ -24,8 +24,7 @@ namespace DynamicProxy
             _dynamicModule = _assemblyBuilder.DefineDynamicModule("m");
             _harmony = new Harmony(typeof(InterceptorManager).FullName);
         }
-        
-        
+
         protected internal static Type CreateDelegateType(string key, Type[] parameterTypes, Type returnType)
         {
             var typeBuilder = _dynamicModule.DefineType(key, TypeAttributes.Public | TypeAttributes.AutoLayout | TypeAttributes.AnsiClass | TypeAttributes.Sealed, typeof(MulticastDelegate));
@@ -80,13 +79,15 @@ namespace DynamicProxy
                     continue;
                 }
                 var interceptorAttribute = methodInfo.GetCustomAttributes<InterceptorAttribute>(true);
-                var s = $"{methodInfo.Name}_{methodInfo.MetadataToken}";
-                var interceptors = interceptorAttribute.Select(e => (IInterceptor)Activator.CreateInstance(e.InterceptorType, e.InterceptorArguments)).ToArray();
+                var key = $"{methodInfo.Name}_{methodInfo.MetadataToken}";
+                var interceptors = interceptorAttribute.OrderByDescending(e => e.Priority)
+                        .Select(e => (IInterceptor)Activator.CreateInstance(e.InterceptorType, e.InterceptorArguments))
+                        .ToArray();
                 if (!interceptors.Any())
                 {
                     continue;
                 }
-                Dictionary[s] = interceptors;
+                Dictionary[key] = interceptors;
                 var list = new List<(Type type, string name, bool isRef, bool isPara)>()
                 {
                     (typeof(Dictionary<object, object>), "__state", true, false)
@@ -105,9 +106,9 @@ namespace DynamicProxy
                 {
                     list.Add((parameterInfo.ParameterType, parameterInfo.Name, true, true));
                 }
-                var pa = Prefix(list, s, i, methodInfo);
-                var p2 = Postfix(list, s, i, methodInfo);
-                Dictionary2[s] = (pa, p2);
+                var pa = Prefix(list, key, i, methodInfo);
+                var p2 = Postfix(list, key, i, methodInfo);
+                Dictionary2[key] = (pa, p2);
                 var factory1 = AccessTools.Method(typeof(Generator), "Prefix");
                 var factory2 = AccessTools.Method(typeof(Generator), "Postfix");
                 _harmony.Patch(methodInfo, new HarmonyMethod(factory1), new HarmonyMethod(factory2));
@@ -271,17 +272,24 @@ namespace DynamicProxy
             }
             dynamicMethod.Return();
 
-            var delegateType = CreateDelegateType(key, parameterTypes, typeof(void));
-            var d = dynamicMethod.CreateDelegate(delegateType, out var ccc);
-            Console.WriteLine(ccc);
-            var dMethod = d.Method;
-            var dm = AccessTools.Field(dMethod.GetType(), "m_owner").GetValue(dMethod) as DynamicMethod;
-            for (var i = 0; i < dm.GetParameters().Length; i++)
+            var delegateType = CreateDelegateType(key + "_postfix", parameterTypes, typeof(void));
+
+            var propertyInfo = AccessTools.Field(dynamicMethod.GetType(), "InnerEmit");
+            var name = AccessTools.Field(dynamicMethod.GetType(), "Name").GetValue(dynamicMethod);
+            var returnType = AccessTools.Field(dynamicMethod.GetType(), "ReturnType").GetValue(dynamicMethod);
+            var module = AccessTools.Field(dynamicMethod.GetType(), "Module").GetValue(dynamicMethod);
+            //this.Name, this.ReturnType, this.ParameterTypes, this.Module, true
+            var innerEmit = propertyInfo.GetValue(dynamicMethod);
+            var property = AccessTools.Property(innerEmit.GetType(), "DynMethod");
+            var method = new DynamicMethod((string)name, (Type)returnType, (Type[])parameterTypes, (Module)module, true);
+            property.SetValue(innerEmit, method);
+            // Console.WriteLine(ccc);
+            for (var i = 0; i < list.Count; i++)
             {
-                var parameterInfo = dm.GetParameters()[i];
-                AccessTools.Field(parameterInfo.GetType(), "NameImpl").SetValue(parameterInfo, list[i].name);
+                method.DefineParameter(i + 1, ParameterAttributes.None, list[i].name);
             }
-            return dm;
+            dynamicMethod.CreateDelegate(delegateType, out var ccc);
+            return method;
         }
 
 
@@ -373,7 +381,7 @@ namespace DynamicProxy
             dynamicMethod.CallVirtual(AccessTools.Method(typeof(IInterceptor), nameof(IInterceptor.BeforeProcess)));
             dynamicMethod.StoreLocal("ctrl");
             dynamicMethod.LoadLocal("ctrl").LoadConstant((int)InterceptControl.SkipOriginalMethod).CompareEqual();
-            dynamicMethod.LoadLocal("ctrl").LoadConstant((int)InterceptControl.All).CompareEqual();
+            dynamicMethod.LoadLocal("ctrl").LoadConstant((int)InterceptControl.SkipAll).CompareEqual();
             dynamicMethod.Or().LoadLocal("ret").Or().StoreLocal("ret");
             dynamicMethod.LoadLocal("ctrl").LoadConstant(0).CompareEqual();
             dynamicMethod.BranchIfFalse("break1");
@@ -450,16 +458,23 @@ namespace DynamicProxy
             dynamicMethod.Return();
 
             var delegateType = CreateDelegateType(key + "_prefix", parameterTypes, typeof(bool));
-            var d = dynamicMethod.CreateDelegate(delegateType, out var ccc);
-            Console.WriteLine(ccc);
-            var dMethod = d.Method;
-            var dm = AccessTools.Field(dMethod.GetType(), "m_owner").GetValue(dMethod) as DynamicMethod;
-            for (var i = 0; i < dm.GetParameters().Length; i++)
+
+            var propertyInfo = AccessTools.Field(dynamicMethod.GetType(), "InnerEmit");
+            var name = AccessTools.Field(dynamicMethod.GetType(), "Name").GetValue(dynamicMethod);
+            var returnType = AccessTools.Field(dynamicMethod.GetType(), "ReturnType").GetValue(dynamicMethod);
+            var module = AccessTools.Field(dynamicMethod.GetType(), "Module").GetValue(dynamicMethod);
+            //this.Name, this.ReturnType, this.ParameterTypes, this.Module, true
+            var innerEmit = propertyInfo.GetValue(dynamicMethod);
+            var property = AccessTools.Property(innerEmit.GetType(), "DynMethod");
+            var method = new DynamicMethod((string)name, (Type)returnType, (Type[])parameterTypes, (Module)module, true);
+            property.SetValue(innerEmit, method);
+            // Console.WriteLine(ccc);
+            for (var i = 0; i < list.Count; i++)
             {
-                var parameterInfo = dm.GetParameters()[i];
-                AccessTools.Field(parameterInfo.GetType(), "NameImpl").SetValue(parameterInfo, list[i].name);
+                method.DefineParameter(i + 1, ParameterAttributes.None, list[i].name);
             }
-            return dm;
+            dynamicMethod.CreateDelegate(delegateType, out var ccc);
+            return method;
         }
     }
 }

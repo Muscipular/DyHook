@@ -13,6 +13,8 @@ namespace DynamicProxy
         }
 
         public Type InterceptorType { get; }
+        
+        public int Priority { get; set; }
 
         public object[] InterceptorArguments { get; set; } = Array.Empty<object>();
     }

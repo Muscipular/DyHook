@@ -27,6 +27,11 @@ namespace WebAPI.Controllers
         [Uow]
         public string Get(string s)
         {
+            return xx();
+        }
+
+        private static string xx()
+        {
             Console.WriteLine("DDD");
             return "1";
         }
@@ -50,7 +55,7 @@ namespace WebAPI.Controllers
                 Console.WriteLine(ctx.Target);
                 ctx.ReturnValue.SetValue("000");
                 ctx.Context["a"] = 1;
-                return InterceptControl.SkipOriginalMethod;
+                return InterceptControl.SkipAll;
             }
 
             public InterceptControl AfterProcess(InterceptorContext ctx)
@@ -61,7 +66,7 @@ namespace WebAPI.Controllers
                     Console.WriteLine(o);
                 }
                 Console.WriteLine(ctx.ReturnValue.GetValue());
-                Console.WriteLine(ctx.Context["a"]);
+                Console.WriteLine(ctx.Context["a"] + "0");
                 ctx.ReturnValue.SetValue("AAAA");
                 return InterceptControl.None;
             }
