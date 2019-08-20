@@ -5,7 +5,7 @@ using System.Reflection;
 
 namespace DynamicProxy
 {
-    public class InterceptorContext : IInterceptorContext
+    internal class InterceptorContext : IInterceptorContext
     {
         public InterceptorContext(MethodInfo method, object target, IReadOnlyList<IDynamicAccessor> parameters, IDynamicAccessor returnValue, IDictionary<object, object> context)
         {

@@ -18,16 +18,6 @@ namespace WebAPI
     {
         public static void Main(string[] args)
         {
-            var harmony = new Harmony("11");
-            var methodInfo = typeof(WeatherForecastController).GetMethod("Get");
-
-            var dynamicMethod = new DynamicMethod("aa", null, null);
-            // foreach (var parameterInfo in methodInfo.GetParameters())
-            // {
-            // var parameter = dynamicMethod.DefineParameter(parameterInfo.Position,  ParameterAttributes.None, parameterInfo.Name);
-            // }
-            // harmony.Patch(methodInfo, new HarmonyMethod(dynamicMethod));
-
             CreateHostBuilder(args).Build().Run();
         }
 
